@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Tables de Calcul - Apprendre en s'amusant !">
+    <title>🌟 Tables de Calcul</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Comic Sans MS', cursive, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+
+    <script>
+        // Système de stockage simple (dans le navigateur)
+        const storage = {
+            get: (key) => {
+                try {
+                    const data = localStorage.getItem(key);
+                    return data ? JSON.parse(data) : null;
+                } catch {
+                    return null;
+                }
+            },
+            set: (key, value) => {
+                try {
+                    localStorage.setItem(key, JSON.stringify(value));
+                    return true;
+                } catch {
+                    return false;
+                }
+            }
+        };
+
+        // État de l'application
+        let state = {
+            screen: 'userSelect',
+            currentUser: null,
+            gameMode: null,
+            operation: null,
+            level: null,
+            timePerQuestion: null,
+            totalQuestions: 0,
+            currentQuestion: 0,
+            score: 0,
+            questionData: null,
+            userAnswer: '',
+            feedback: null,
+            timeLeft: null,
+            startTime: null,
+            gameDetails: [],
+            stats: storage.get('math_stats') || {},
+            timerId: null
+        };
+
+        // Sauvegarder les stats
+        function saveStats() {
+            storage.set('math_stats', state.stats);
+        }
+
+        // Générer une question
+        function generateQuestion() {
+            const limits = state.operation === '3' 
+                ? { facile: 5, moyen: 10, difficile: 12 }
+                : { facile: 10, moyen: 20, difficile: 50 };
+            const maxVal = limits[state.level];
+            
+            const ops = state.operation === '4' ? ['1', '2', '3'] : [state.operation];
+            const selectedOp = ops[Math.floor(Math.random() * ops.length)];
+            
+            let a, b, correct, opSymbol, text;
+            
+            if (selectedOp === '1') {
+                a = Math.floor(Math.random() * maxVal) + 1;
+                b = Math.floor(Math.random() * maxVal) + 1;
+                correct = a + b;
+                opSymbol = '+';
+            } else if (selectedOp === '2') {
+                a = Math.floor(Math.random() * maxVal) + 1;
+                b = Math.floor(Math.random() * a) + 1;
+                correct = a - b;
+                opSymbol = '-';
+            } else {
+                a = Math.floor(Math.random() * maxVal) + 1;
+                b = Math.floor(Math.random() * maxVal) + 1;
+                correct = a * b;
+                opSymbol = '×';
+            }
+
+            // Mode trou
+            if (state.gameMode === 'trou') {
+                if (state.level === 'facile') {
+                    const pos = Math.random() > 0.5 ? 'a' : 'b';
+                    if (pos === 'a') {
+                        text = `? ${opSymbol} ${b} = ${correct}`;
+                        correct = a;
+                    } else {
+                        text = `${a} ${opSymbol} ? = ${correct}`;
+                        correct = b;
+                    }
+                } else {
+                    const c = Math.floor(Math.random() * maxVal) + 1;
+                    if (selectedOp === '1') {
+                        const result = a + b + c;
+                        const pos = Math.floor(Math.random() * 3);
+                        if (pos === 0) {
+                            text = `? ${opSymbol} ${b} ${opSymbol} ${c} = ${result}`;
+                            correct = a;
+                        } else if (pos === 1) {
+                            text = `${a} ${opSymbol} ? ${opSymbol} ${c} = ${result}`;
+                            correct = b;
+                        } else {
+                            text = `${a} ${opSymbol} ${b} ${opSymbol} ? = ${result}`;
+                            correct = c;
+                        }
+                    } else {
+                        text = `? ${opSymbol} ${b} = ${correct}`;
+                        correct = a;
+                    }
+                }
+            } else if (state.gameMode === 'qcm_inverse') {
+                text = `? = ${correct}`;
+            } else {
+                text = `${a} ${opSymbol} ${b} = ?`;
+            }
+
+            // Générer options QCM
+            const wrongAnswers = new Set();
+            const offsets = [-2, -1, 1, 2, 3, -3, 4, -4, 5, -5];
+            offsets.sort(() => Math.random() - 0.5);
+            
+            for (const offset of offsets) {
+                const wrong = correct + offset;
+                if (wrong >= 0 && wrong !== correct) {
+                    wrongAnswers.add(wrong);
+                    if (wrongAnswers.size === 4) break;
+                }
+            }
+            
+            const options = [...Array.from(wrongAnswers).slice(0, 4), correct];
+            options.sort(() => Math.random() - 0.5);
+
+            // Options QCM inversé
+            let operationOptions = [];
+            if (state.gameMode === 'qcm_inverse') {
+                operationOptions = [`${a} ${opSymbol} ${b}`];
+                for (let i = 0; i < 4; i++) {
+                    const symbols = ['+', '-', '×'];
+                    const randSym = symbols[Math.floor(Math.random() * symbols.length)];
+                    const a2 = Math.floor(Math.random() * maxVal) + 1;
+                    const b2 = Math.floor(Math.random() * maxVal) + 1;
+                    operationOptions.push(`${a2} ${randSym} ${b2}`);
+                }
+                operationOptions.sort(() => Math.random() - 0.5);
+            }
+
+            state.questionData = {
+                text,
+                correct,
+                options,
+                operationOptions,
+                correctOperation: `${a} ${opSymbol} ${b}`
+            };
+            
+            if (state.timePerQuestion) {
+                state.timeLeft = state.timePerQuestion;
+                startTimer();
+            }
+            state.startTime = Date.now();
+        }
+
+        // Timer
+        function startTimer() {
+            if (state.timerId) clearInterval(state.timerId);
+            state.timerId = setInterval(() => {
+                if (state.timeLeft > 0) {
+                    state.timeLeft--;
+                    render();
+                } else {
+                    clearInterval(state.timerId);
+                    handleAnswer(false);
+                }
+            }, 1000);
+        }
+
+        // Gérer la réponse
+        function handleAnswer(isCorrect) {
+            if (state.timerId) {
+                clearInterval(state.timerId);
+                state.timerId = null;
+            }
+
+            const responseTime = (Date.now() - state.startTime) / 1000;
+            state.gameDetails.push({
+                correct: isCorrect,
+                time: responseTime
+            });
+
+            if (isCorrect) {
+                state.score++;
+                state.feedback = { type: 'success', message: '✅ Bravo ! C\'est correct ! 🎉' };
+            } else {
+                // Message différent pour QCM inversé
+                if (state.gameMode === 'qcm_inverse') {
+                    state.feedback = { 
+                        type: 'error', 
+                        message: `❌ C'était ${state.questionData.correctOperation} = ${state.questionData.correct}` 
+                    };
+                } else {
+                    state.feedback = { 
+                        type: 'error', 
+                        message: `❌ Oups ! La réponse était ${state.questionData.correct}` 
+                    };
+                }
+            }
+
+            render();
+
+            setTimeout(() => {
+                state.feedback = null;
+                state.userAnswer = '';
+                
+                if (state.currentQuestion < state.totalQuestions) {
+                    state.currentQuestion++;
+                    generateQuestion();
+                    render();
+                } else {
+                    finishGame();
+                }
+            }, 2000);
+        }
+
+        // Terminer le jeu
+        function finishGame() {
+            const duration = Math.floor((Date.now() - state.startTime) / 1000);
+            
+            const gameRecord = {
+                date: new Date().toISOString(),
+                mode: state.gameMode,
+                operation: state.operation,
+                level: state.level,
+                score: state.score,
+                totalQuestions: state.totalQuestions,
+                duration: duration,
+                details: state.gameDetails
+            };
+
+            if (!state.stats[state.currentUser]) {
+                state.stats[state.currentUser] = { games: [], badges: [] };
+            }
+            state.stats[state.currentUser].games.push(gameRecord);
+            
+            saveStats();
+            state.screen = 'results';
+            render();
+        }
+
+        // Réinitialiser le jeu
+        function resetGame() {
+            if (state.timerId) clearInterval(state.timerId);
+            state.gameMode = null;
+            state.operation = null;
+            state.level = null;
+            state.timePerQuestion = null;
+            state.totalQuestions = 0;
+            state.currentQuestion = 0;
+            state.score = 0;
+            state.questionData = null;
+            state.userAnswer = '';
+            state.feedback = null;
+            state.timeLeft = null;
+            state.gameDetails = [];
+        }
+
+        // Rendu HTML
+        function render() {
+            const app = document.getElementById('app');
+            
+            if (state.screen === 'userSelect') {
+                const users = Object.keys(state.stats);
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4">
+                        <div class="max-w-2xl mx-auto">
+                            <h1 class="text-4xl font-bold text-center text-pink-600 mb-8 mt-8">
+                                👤 Qui joue aujourd'hui ?
+                            </h1>
+                            
+                            ${users.length > 0 ? `
+                                <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
+                                    <h2 class="text-xl font-bold text-gray-700 mb-4">Choisis ton prénom :</h2>
+                                    ${users.map(user => `
+                                        <button onclick="selectUser('${user}')" 
+                                            class="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 px-6 rounded-xl mb-3 transition">
+                                            👤 ${user} (${state.stats[user].games.length} parties)
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                            
+                            <div class="bg-white rounded-2xl shadow-lg p-6">
+                                <button onclick="createUser()" 
+                                    class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-xl transition">
+                                    ➕ Nouveau joueur
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (state.screen === 'home') {
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4">
+                        <div class="max-w-2xl mx-auto">
+                            <h1 class="text-4xl font-bold text-center text-pink-600 mb-2 mt-8">
+                                🌟 Bonjour ${state.currentUser} ! 🌟
+                            </h1>
+                            <p class="text-center text-pink-500 text-lg mb-8">Apprendre en s'amusant !</p>
+                            
+                            <div class="space-y-4">
+                                <button onclick="setGameMode('saisie')" 
+                                    class="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    ✏️ Mode Saisie
+                                </button>
+                                
+                                <button onclick="setGameMode('qcm')" 
+                                    class="w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    🎯 Mode QCM
+                                </button>
+                                
+                                <button onclick="setGameMode('qcm_inverse')" 
+                                    class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    🔄 QCM Inversé
+                                </button>
+                                
+                                <button onclick="setGameMode('trou')" 
+                                    class="w-full bg-pink-600 hover:bg-pink-700 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    ❓ Opération à trou
+                                </button>
+                                
+                                <button onclick="goToStats()" 
+                                    class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    📊 Mes Statistiques
+                                </button>
+                            </div>
+                            
+                            <div class="mt-8">
+                                <button onclick="goToUserSelect()" 
+                                    class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl transition">
+                                    🔄 Changer de joueur
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (state.screen === 'operation') {
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4">
+                        <div class="max-w-2xl mx-auto">
+                            <h1 class="text-4xl font-bold text-center text-pink-600 mb-8 mt-8">
+                                Quelle opération ?
+                            </h1>
+                            
+                            <div class="space-y-4">
+                                <button onclick="setOperation('1')" 
+                                    class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    ➕ Addition
+                                </button>
+                                <button onclick="setOperation('2')" 
+                                    class="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    ➖ Soustraction
+                                </button>
+                                <button onclick="setOperation('3')" 
+                                    class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    ✖️ Multiplication
+                                </button>
+                                <button onclick="setOperation('4')" 
+                                    class="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    🎲 Mélange
+                                </button>
+                            </div>
+                            
+                            <button onclick="goToHome()" 
+                                class="w-full mt-8 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-xl transition">
+                                ← Retour
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else if (state.screen === 'level') {
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4">
+                        <div class="max-w-2xl mx-auto">
+                            <h1 class="text-4xl font-bold text-center text-pink-600 mb-8 mt-8">
+                                Choisis ton niveau
+                            </h1>
+                            
+                            <div class="space-y-4">
+                                <button onclick="setLevel('facile')" 
+                                    class="w-full bg-green-400 hover:bg-green-500 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    😊 Facile
+                                </button>
+                                <button onclick="setLevel('moyen')" 
+                                    class="w-full bg-yellow-400 hover:bg-yellow-500 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    😎 Moyen
+                                </button>
+                                <button onclick="setLevel('difficile')" 
+                                    class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    🔥 Difficile
+                                </button>
+                            </div>
+                            
+                            <button onclick="goToOperation()" 
+                                class="w-full mt-8 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-xl transition">
+                                ← Retour
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else if (state.screen === 'time') {
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4">
+                        <div class="max-w-2xl mx-auto">
+                            <h1 class="text-4xl font-bold text-center text-pink-600 mb-8 mt-8">
+                                Temps par question ?
+                            </h1>
+                            
+                            <div class="space-y-4">
+                                <button onclick="setTime(10)" 
+                                    class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    ⏱️ 10 secondes
+                                </button>
+                                <button onclick="setTime(20)" 
+                                    class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    ⏱️ 20 secondes
+                                </button>
+                                <button onclick="setTime(30)" 
+                                    class="w-full bg-green-400 hover:bg-green-500 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    ⏱️ 30 secondes
+                                </button>
+                                <button onclick="setTime(null)" 
+                                    class="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                    ∞ Pas de limite
+                                </button>
+                            </div>
+                            
+                            <button onclick="goToLevel()" 
+                                class="w-full mt-8 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-xl transition">
+                                ← Retour
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else if (state.screen === 'questions') {
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4">
+                        <div class="max-w-2xl mx-auto">
+                            <h1 class="text-4xl font-bold text-center text-pink-600 mb-8 mt-8">
+                                Combien de questions ?
+                            </h1>
+                            
+                            <div class="space-y-4">
+                                ${[5, 10, 15, 20].map(num => `
+                                    <button onclick="startGame(${num})" 
+                                        class="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                        ${num} questions
+                                    </button>
+                                `).join('')}
+                            </div>
+                            
+                            <button onclick="goToTime()" 
+                                class="w-full mt-8 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-xl transition">
+                                ← Retour
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else if (state.screen === 'question' && state.questionData) {
+                const opColors = {
+                    '+': 'bg-green-500',
+                    '-': 'bg-orange-500',
+                    '×': 'bg-blue-500'
+                };
+                const color = state.questionData.text.includes('+') ? opColors['+'] : 
+                             state.questionData.text.includes('-') ? opColors['-'] : 
+                             state.questionData.text.includes('×') ? opColors['×'] : 'bg-purple-500';
+
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4">
+                        <div class="max-w-2xl mx-auto">
+                            <div class="text-center mb-4 mt-4">
+                                <p class="text-xl font-bold text-pink-600">
+                                    Question ${state.currentQuestion}/${state.totalQuestions} | Score: ${state.score}
+                                </p>
+                                ${state.timeLeft !== null ? `
+                                    <p class="text-2xl font-bold mt-2 ${state.timeLeft <= 5 ? 'text-red-600' : state.timeLeft <= 10 ? 'text-orange-500' : 'text-green-600'}">
+                                        ⏱️ ${state.timeLeft}s
+                                    </p>
+                                ` : ''}
+                            </div>
+
+                            <div class="${color} rounded-2xl shadow-2xl p-12 mb-6">
+                                <p class="text-5xl font-bold text-white text-center">
+                                    ${state.questionData.text}
+                                </p>
+                            </div>
+
+                            ${state.feedback ? `
+                                <div class="${state.feedback.type === 'success' ? 'bg-green-400' : 'bg-red-400'} rounded-xl p-4 mb-6 text-center">
+                                    <p class="text-xl font-bold text-white">${state.feedback.message}</p>
+                                </div>
+                            ` : ''}
+
+                            ${!state.feedback ? (state.gameMode === 'saisie' ? `
+                                <div class="space-y-4">
+                                    <input type="number" id="answerInput" 
+                                        class="w-full text-3xl text-center py-4 px-6 rounded-xl border-4 border-pink-300 focus:border-pink-500 outline-none"
+                                        placeholder="Ta réponse" autofocus>
+                                    <button onclick="checkAnswer()" 
+                                        class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-xl transition shadow-lg">
+                                        ✓ Valider
+                                    </button>
+                                </div>
+                            ` : state.gameMode === 'qcm_inverse' ? `
+                                <div class="grid grid-cols-2 gap-4">
+                                    ${state.questionData.operationOptions.map(op => `
+                                        <button onclick="handleAnswer('${op}' === '${state.questionData.correctOperation}')" 
+                                            class="bg-gradient-to-br from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white font-bold py-6 px-4 rounded-xl transition shadow-lg text-xl">
+                                            ${op}
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            ` : `
+                                <div class="grid grid-cols-2 gap-4">
+                                    ${state.questionData.options.map(option => `
+                                        <button onclick="handleAnswer(${option} === ${state.questionData.correct})" 
+                                            class="bg-gradient-to-br from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white font-bold py-6 px-4 rounded-xl transition shadow-lg text-2xl">
+                                            ${option}
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            `) : ''}
+                        </div>
+                    </div>
+                `;
+
+                // Ajouter l'événement Enter pour le mode saisie
+                if (state.gameMode === 'saisie' && !state.feedback) {
+                    setTimeout(() => {
+                        const input = document.getElementById('answerInput');
+                        if (input) {
+                            input.focus();
+                            input.addEventListener('keypress', (e) => {
+                                if (e.key === 'Enter') checkAnswer();
+                            });
+                        }
+                    }, 100);
+                }
+            } else if (state.screen === 'results') {
+                const percentage = Math.round((state.score / state.totalQuestions) * 100);
+                const userGames = state.stats[state.currentUser]?.games || [];
+                const lastGame = userGames[userGames.length - 1];
+                
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4">
+                        <div class="max-w-2xl mx-auto">
+                            <h1 class="text-4xl font-bold text-center text-pink-600 mb-8 mt-8">
+                                🏆 Résultats 🏆
+                            </h1>
+                            
+                            <div class="bg-yellow-400 rounded-2xl shadow-2xl p-8 mb-6">
+                                <p class="text-3xl font-bold text-white text-center mb-4">
+                                    Score : ${state.score} / ${state.totalQuestions}
+                                </p>
+                                <p class="text-2xl font-bold text-white text-center mb-4">
+                                    Pourcentage : ${percentage}%
+                                </p>
+                                ${lastGame ? `
+                                    <p class="text-xl font-bold text-white text-center">
+                                        Temps total : ${lastGame.duration}s
+                                    </p>
+                                ` : ''}
+                            </div>
+
+                            <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
+                                <p class="text-2xl font-bold text-center ${
+                                    percentage === 100 ? 'text-green-600' :
+                                    percentage >= 80 ? 'text-green-500' :
+                                    percentage >= 50 ? 'text-yellow-600' : 'text-orange-600'
+                                }">
+                                    ${percentage === 100 ? '🌟 PARFAIT ! Tu es un champion ! 🌟' :
+                                      percentage >= 80 ? '😊 Très bien ! Continue comme ça !' :
+                                      percentage >= 50 ? '👍 Pas mal ! Continue à t\'entraîner !' :
+                                      '💪 Continue, tu vas progresser !'}
+                                </p>
+                            </div>
+
+                            <div class="space-y-4">
+                                <button onclick="goToStats()" 
+                                    class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-6 rounded-xl transition">
+                                    📊 Voir mes stats
+                                </button>
+                                <button onclick="goToHomeAndReset()" 
+                                    class="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-3 px-6 rounded-xl transition">
+                                    🔄 Rejouer
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (state.screen === 'stats') {
+                const userGames = state.stats[state.currentUser]?.games || [];
+                const totalCorrect = userGames.reduce((sum, g) => sum + g.score, 0);
+                const totalQuestions = userGames.reduce((sum, g) => sum + g.totalQuestions, 0);
+                const successRate = totalQuestions > 0 ? ((totalCorrect / totalQuestions) * 100).toFixed(1) : 0;
+                
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4">
+                        <div class="max-w-2xl mx-auto pb-8">
+                            <h1 class="text-3xl font-bold text-center text-pink-600 mb-6 mt-8">
+                                📊 Statistiques de ${state.currentUser}
+                            </h1>
+                            
+                            ${userGames.length === 0 ? `
+                                <div class="bg-white rounded-2xl shadow-lg p-8 text-center">
+                                    <p class="text-xl text-gray-600">
+                                        Aucune partie jouée encore.<br/>
+                                        Commence à jouer pour voir tes statistiques !
+                                    </p>
+                                </div>
+                            ` : `
+                                <div class="space-y-4">
+                                    <div class="bg-purple-100 rounded-2xl shadow-lg p-6">
+                                        <h2 class="text-2xl font-bold text-purple-800 mb-4">📈 Résumé Global</h2>
+                                        <div class="space-y-2 text-gray-700">
+                                            <p>🎮 Parties jouées : ${userGames.length}</p>
+                                            <p>❓ Questions répondues : ${totalQuestions}</p>
+                                            <p>✅ Réponses correctes : ${totalCorrect}</p>
+                                            <p>📊 Taux de réussite : ${successRate}%</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="bg-yellow-100 rounded-2xl shadow-lg p-6">
+                                        <h2 class="text-2xl font-bold text-yellow-800 mb-4">🏆 Badges</h2>
+                                        <div class="space-y-2 text-gray-700">
+                                            ${userGames.length >= 50 ? '<p>🌟 EXPERT - 50 parties</p>' : ''}
+                                            ${userGames.length >= 20 && userGames.length < 50 ? '<p>⭐ HABITUÉ - 20 parties</p>' : ''}
+                                            ${userGames.length >= 10 && userGames.length < 20 ? '<p>✨ DÉBUTANT - 10 parties</p>' : ''}
+                                            ${userGames.filter(g => g.score === g.totalQuestions).length >= 3 ? '<p>🎯 PRÉCIS - 3 parties parfaites</p>' : ''}
+                                            ${userGames.length < 10 ? '<p>Continue à jouer pour débloquer des badges !</p>' : ''}
+                                        </div>
+                                    </div>
+
+                                    <div class="bg-blue-100 rounded-2xl shadow-lg p-6">
+                                        <h2 class="text-2xl font-bold text-blue-800 mb-4">📜 Dernières parties</h2>
+                                        <div class="space-y-2">
+                                            ${userGames.slice(-5).reverse().map((game, idx) => {
+                                                const pct = Math.round((game.score / game.totalQuestions) * 100);
+                                                const modeEmoji = game.mode === 'saisie' ? '✏️' : game.mode === 'qcm' ? '🎯' : game.mode === 'trou' ? '❓' : '🔄';
+                                                const opEmoji = game.operation === '1' ? '➕' : game.operation === '2' ? '➖' : game.operation === '3' ? '✖️' : '🎲';
+                                                
+                                                return `
+                                                    <div class="bg-white rounded-lg p-3">
+                                                        <p class="font-bold ${pct >= 80 ? 'text-green-600' : pct >= 60 ? 'text-yellow-600' : 'text-red-600'}">
+                                                            ${modeEmoji} ${opEmoji} | ${game.score}/${game.totalQuestions} (${pct}%)
+                                                        </p>
+                                                        <p class="text-sm text-gray-500">${new Date(game.date).toLocaleDateString('fr-FR')}</p>
+                                                    </div>
+                                                `;
+                                            }).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            `}
+                            
+                            <button onclick="goToHome()" 
+                                class="w-full mt-6 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-xl transition">
+                                ← Retour à l'accueil
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Fonctions globales
+        window.selectUser = (name) => {
+            state.currentUser = name;
+            state.screen = 'home';
+            render();
+        };
+
+        window.createUser = () => {
+            const name = prompt('Entre ton prénom :');
+            if (name && name.trim()) {
+                const userName = name.trim();
+                state.currentUser = userName;
+                if (!state.stats[userName]) {
+                    state.stats[userName] = { games: [], badges: [] };
+                    saveStats();
+                }
+                state.screen = 'home';
+                render();
+            }
+        };
+
+        window.setGameMode = (mode) => {
+            state.gameMode = mode;
+            state.screen = 'operation';
+            render();
+        };
+
+        window.setOperation = (op) => {
+            state.operation = op;
+            state.screen = 'level';
+            render();
+        };
+
+        window.setLevel = (level) => {
+            state.level = level;
+            state.screen = 'time';
+            render();
+        };
+
+        window.setTime = (time) => {
+            state.timePerQuestion = time;
+            state.screen = 'questions';
+            render();
+        };
+
+        window.startGame = (num) => {
+            state.totalQuestions = num;
+            state.currentQuestion = 1;
+            state.score = 0;
+            state.gameDetails = [];
+            state.screen = 'question';
+            generateQuestion();
+            render();
+        };
+
+        window.checkAnswer = () => {
+            const input = document.getElementById('answerInput');
+            if (input) {
+                const answer = parseInt(input.value);
+                if (!isNaN(answer)) {
+                    handleAnswer(answer === state.questionData.correct);
+                }
+            }
+        };
+
+        window.goToUserSelect = () => {
+            resetGame();
+            state.screen = 'userSelect';
+            render();
+        };
+
+        window.goToHome = () => {
+            resetGame();
+            state.screen = 'home';
+            render();
+        };
+
+        window.goToHomeAndReset = () => {
+            resetGame();
+            state.screen = 'home';
+            render();
+        };
+
+        window.goToOperation = () => {
+            state.screen = 'operation';
+            render();
+        };
+
+        window.goToLevel = () => {
+            state.screen = 'level';
+            render();
+        };
+
+        window.goToTime = () => {
+            state.screen = 'time';
+            render();
+        };
+
+        window.goToStats = () => {
+            state.screen = 'stats';
+            render();
+        };
+
+        window.handleAnswer = handleAnswer;
+
+        // Démarrer l'application
+        render();
+    </script>
+</body>
+</html>
+                
