@@ -193,7 +193,17 @@
                     if (input) {
                         state.userAnswer = input.value;
                     }
-                    render();
+                    // Ne re-render que le timer, pas toute la page
+                    const timerLabel = document.getElementById('timerDisplay');
+                    if (timerLabel && state.gameMode === 'saisie') {
+                        // Mettre à jour uniquement le timer
+                        const colorClass = state.timeLeft <= 5 ? 'text-red-600' : state.timeLeft <= 10 ? 'text-orange-500' : 'text-green-600';
+                        timerLabel.className = `text-2xl font-bold mt-2 ${colorClass}`;
+                        timerLabel.textContent = `⏱️ ${state.timeLeft}s`;
+                    } else {
+                        // Pour les autres modes, render complet
+                        render();
+                    }
                 } else {
                     clearInterval(state.timerId);
                     // Si en mode saisie et qu'il y a une réponse, la valider automatiquement
