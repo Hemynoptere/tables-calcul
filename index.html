@@ -193,15 +193,29 @@
                     if (input) {
                         state.userAnswer = input.value;
                     }
-                    // Ne re-render que le timer, pas toute la page
-                    const timerLabel = document.getElementById('timerDisplay');
-                    if (timerLabel && state.gameMode === 'saisie') {
-                        // Mettre à jour uniquement le timer
-                        const colorClass = state.timeLeft <= 5 ? 'text-red-600' : state.timeLeft <= 10 ? 'text-orange-500' : 'text-green-600';
-                        timerLabel.className = `text-2xl font-bold mt-2 ${colorClass}`;
-                        timerLabel.textContent = `⏱️ ${state.timeLeft}s`;
-                    } else {
-                        // Pour les autres modes, render complet
+                    
+                    // Bip sonore pour les 5 dernières secondes
+                    if (state.timeLeft <= 5 && state.timeLeft > 0) {
+                        // Créer un bip sonore simple
+                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        const oscillator = audioContext.createOscillator();
+                        const gainNode = audioContext.createGain();
+                        
+                        oscillator.connect(gainNode);
+                        gainNode.connect(audioContext.destination);
+                        
+                        oscillator.frequency.value = 800;
+                        oscillator.type = 'sine';
+                        
+                        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+                        
+                        oscillator.start(audioContext.currentTime);
+                        oscillator.stop(audioContext.currentTime + 0.1);
+                    }
+                    
+                    // Ne pas re-render en mode saisie (pour éviter le clignotement)
+                    if (state.gameMode !== 'saisie') {
                         render();
                     }
                 } else {
