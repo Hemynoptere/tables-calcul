@@ -10,6 +10,15 @@
         body {
             font-family: 'Comic Sans MS', cursive, sans-serif;
         }
+        /* Masquer les flèches du champ number */
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
     </style>
 </head>
 <body>
@@ -88,7 +97,7 @@
                 a = Math.floor(Math.random() * maxVal) + 1;
                 b = Math.floor(Math.random() * maxVal) + 1;
                 correct = a * b;
-                opSymbol = '×';
+                opSymbol = 'x';
             }
 
             // Mode trou
@@ -149,7 +158,7 @@
             if (state.gameMode === 'qcm_inverse') {
                 operationOptions = [`${a} ${opSymbol} ${b}`];
                 for (let i = 0; i < 4; i++) {
-                    const symbols = ['+', '-', '×'];
+                    const symbols = ['+', '-', 'x'];
                     const randSym = symbols[Math.floor(Math.random() * symbols.length)];
                     const a2 = Math.floor(Math.random() * maxVal) + 1;
                     const b2 = Math.floor(Math.random() * maxVal) + 1;
@@ -179,9 +188,23 @@
             state.timerId = setInterval(() => {
                 if (state.timeLeft > 0) {
                     state.timeLeft--;
+                    // Sauvegarder la valeur de l'input avant de re-render
+                    const input = document.getElementById('answerInput');
+                    if (input) {
+                        state.userAnswer = input.value;
+                    }
                     render();
                 } else {
                     clearInterval(state.timerId);
+                    // Si en mode saisie et qu'il y a une réponse, la valider automatiquement
+                    if (state.gameMode === 'saisie' && state.userAnswer) {
+                        const answer = parseInt(state.userAnswer);
+                        if (!isNaN(answer)) {
+                            handleAnswer(answer === state.questionData.correct);
+                            return;
+                        }
+                    }
+                    // Sinon, réponse fausse
                     handleAnswer(false);
                 }
             }, 1000);
@@ -231,7 +254,7 @@
                 } else {
                     finishGame();
                 }
-            }, 2000);
+            }, 4000);
         }
 
         // Terminer le jeu
@@ -481,11 +504,11 @@
                 const opColors = {
                     '+': 'bg-green-500',
                     '-': 'bg-orange-500',
-                    '×': 'bg-blue-500'
+                    'x': 'bg-blue-500'
                 };
                 const color = state.questionData.text.includes('+') ? opColors['+'] : 
                              state.questionData.text.includes('-') ? opColors['-'] : 
-                             state.questionData.text.includes('×') ? opColors['×'] : 'bg-purple-500';
+                             state.questionData.text.includes('x') ? opColors['x'] : 'bg-purple-500';
 
                 app.innerHTML = `
                     <div class="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4">
@@ -515,7 +538,7 @@
 
                             ${!state.feedback ? (state.gameMode === 'saisie' ? `
                                 <div class="space-y-4">
-                                    <input type="number" id="answerInput" 
+                                    <input type="number" id="answerInput" value="${state.userAnswer}"
                                         class="w-full text-3xl text-center py-4 px-6 rounded-xl border-4 border-pink-300 focus:border-pink-500 outline-none"
                                         placeholder="Ta réponse" autofocus>
                                     <button onclick="checkAnswer()" 
@@ -554,6 +577,9 @@
                             input.focus();
                             input.addEventListener('keypress', (e) => {
                                 if (e.key === 'Enter') checkAnswer();
+                            });
+                            input.addEventListener('input', (e) => {
+                                state.userAnswer = e.target.value;
                             });
                         }
                     }, 100);
@@ -659,7 +685,7 @@
                                             ${userGames.slice(-5).reverse().map((game, idx) => {
                                                 const pct = Math.round((game.score / game.totalQuestions) * 100);
                                                 const modeEmoji = game.mode === 'saisie' ? '✏️' : game.mode === 'qcm' ? '🎯' : game.mode === 'trou' ? '❓' : '🔄';
-                                                const opEmoji = game.operation === '1' ? '➕' : game.operation === '2' ? '➖' : game.operation === '3' ? '✖️' : '🎲';
+                                                const opEmoji = game.operation === '1' ? '+' : game.operation === '2' ? '-' : game.operation === '3' ? 'x' : '🎲';
                                                 
                                                 return `
                                                     <div class="bg-white rounded-lg p-3">
@@ -745,6 +771,7 @@
             if (input) {
                 const answer = parseInt(input.value);
                 if (!isNaN(answer)) {
+                    state.userAnswer = input.value; // Sauvegarder avant de valider
                     handleAnswer(answer === state.questionData.correct);
                 }
             }
